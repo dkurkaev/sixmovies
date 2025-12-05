@@ -57,6 +57,9 @@ class Title(models.Model):
         blank=True
     )
 
+    imdb_rating = models.FloatField(null=True, blank=True)
+    imdb_votes = models.IntegerField(null=True, blank=True)
+
     class Meta:
         db_table = "titles"
         indexes = [

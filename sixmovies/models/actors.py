@@ -72,6 +72,24 @@ class Actor(models.Model):
 
     def __str__(self):
         return self.name
+    
+    # Наш рассчитанный рейтинг популярности актёра
+    popularity_score = models.FloatField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Агрегированный рейтинг популярности актёра",
+    )
+
+    # Версия алгоритма/параметров, по которой считался рейтинг
+    popularity_version = models.ForeignKey(
+        "sixmovies.PopularityVersion",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="actors",
+        help_text="Ссылка на версию расчёта популярности",
+    )
 
 
 class ActorProfession(models.Model):
@@ -102,3 +120,4 @@ class ActorProfession(models.Model):
 
     def __str__(self):
         return f"{self.actor.name} → {self.profession.name}"
+    
