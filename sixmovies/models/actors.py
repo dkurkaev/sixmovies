@@ -60,6 +60,13 @@ class Actor(models.Model):
         related_name="actors",
     )
 
+
+    known_for = models.ManyToManyField(
+    "sixmovies.Title",
+    related_name="featured_actors",
+    blank=True,
+    )
+
     class Meta:
         db_table = "actors"
 
