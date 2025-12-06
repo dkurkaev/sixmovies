@@ -300,9 +300,18 @@ def recalc_actor_popularity(
 
          SCS нормализуем в 0–1000 и комбинируем:
 
-             final_score = 0.5 * popularity_score + 0.5 * scs_norm
+             combined = 0.5 * popularity_score + 0.5 * scs_norm
 
-         voice-актеров (is_voice_actor = TRUE) в финале обнуляем.
+      7) Дополнительные корректировки:
+         - age-пессимизация по качественно-взвешенному среднему году:
+               mean_hit_year < 1970  → ×0.10
+               1970 ≤ mean_hit_year < 1985 → ×0.35
+               1985 ≤ mean_hit_year < 2000 → ×0.75
+               ≥ 2000 → ×1.0
+         - выкидываем voice-актеров (is_voice_actor = TRUE);
+         - manual flags:
+               blackmark → итоговый рейтинг = 0
+               wildcard  → мягкий буст (×1.3, но не выше 1000)
     """
 
     # 1. глобальные параметры качества фильмов
@@ -321,7 +330,8 @@ def recalc_actor_popularity(
             f"(MIN_VOTES_QUALITY={MIN_VOTES_QUALITY}, "
             f"hit thresholds={HIT_VOTES_LEVEL_1}/"
             f"{HIT_VOTES_LEVEL_2}/{HIT_VOTES_LEVEL_3}, "
-            f"SCS with pow(6) connectivity)"
+            f"SCS pow(6), age penalty by mean hit year, "
+            f"voice filter, blackmark/wildcard)"
         ),
     )
 
@@ -334,16 +344,21 @@ def recalc_actor_popularity(
         return version
 
     # 4. агрегаты по актёрам (только по значимым тайтлам!)
-    role_sum: Dict[int, float] = defaultdict(float)       # Σ role_weight
-    quality_sum: Dict[int, float] = defaultdict(float)    # Σ role_weight * title_quality
-    roles_count: Dict[int, int] = defaultdict(int)        # количество principal-записей
-    actor_genres: Dict[int, Set[str]] = defaultdict(set)  # множество жанров
+    role_sum: Dict[int, float] = defaultdict(float)        # Σ role_weight
+    quality_sum: Dict[int, float] = defaultdict(float)     # Σ role_weight * title_quality
+    roles_count: Dict[int, int] = defaultdict(int)         # количество principal-записей
+    actor_genres: Dict[int, Set[str]] = defaultdict(set)   # множество жанров
+
+    # Для age-пессимизации: качественно-взвешенный средний год
+    # на основе веса w = title_quality * role_weight.
+    year_weight_sum: Dict[int, float] = defaultdict(float)
+    year_weight_mass: Dict[int, float] = defaultdict(float)
 
     principals_qs = (
         TitlePrincipal.objects
         .select_related("title", "actor")
         .filter(category__in=["actor", "actress"])
-        .only("id", "actor_id", "title_id", "ordering")
+        .only("id", "actor_id", "title_id", "ordering", "title__start_year")
     )
 
     processed = 0
@@ -372,6 +387,13 @@ def recalc_actor_popularity(
         roles_count[actor_id] += 1
         for g in title_genres.get(title_id, ()):
             actor_genres[actor_id].add(g)
+
+        # 4) age-профиль: w = tq * mr, на нём считаем средний год
+        start_year = getattr(tp.title, "start_year", None)
+        if start_year is not None:
+            w = tq * mr
+            year_weight_sum[actor_id] += start_year * w
+            year_weight_mass[actor_id] += w
 
         if processed % 1_000_000 == 0:
             print(
@@ -419,6 +441,13 @@ def recalc_actor_popularity(
 
         s_reach_raw[actor_id] = gv + 0.5 * fv
 
+    # 5.1. считаем mean_hit_year по качественно-взвешенному профилю
+    mean_hit_year: Dict[int, float] = {}
+    for actor_id in actor_ids:
+        mass = year_weight_mass.get(actor_id, 0.0)
+        if mass > 0.0:
+            mean_hit_year[actor_id] = year_weight_sum[actor_id] / mass
+
     # 6. нормализуем каждый компонент в [0;1]
     s_role_norm = _normalize_component(s_role_raw)
     s_quality_norm = _normalize_component(s_quality_raw)
@@ -458,15 +487,22 @@ def recalc_actor_popularity(
     # 1. Загружаем популярность в память
     actor_pop = base_popularity  # 0..1000 базовые популярности
 
-    # 1.1. Загружаем is_voice_actor, чтобы выкинуть дубляж
-    voice_flags: Dict[int, bool] = {
-        actor_id: is_voice
-        for actor_id, is_voice in Actor.objects
-        .filter(id__in=actor_pop.keys())
-        .values_list("id", "is_voice_actor")
-    }
+    # 1.1. Загружаем флаги актёров (voice, blackmark, wildcard)
+    voice_flags: Dict[int, bool] = {}
+    black_flags: Dict[int, bool] = {}
+    wildcard_flags: Dict[int, bool] = {}
 
-    # 2. Загружаем actor_edges через ORM: actor_id_low_id, actor_id_high_id, weight
+    for actor_id, is_voice, blackmark, wildcard in (
+        Actor.objects
+        .filter(id__in=actor_pop.keys())
+        .values_list("id", "is_voice_actor", "blackmark", "wildcard")
+    ):
+        voice_flags[actor_id] = bool(is_voice)
+        black_flags[actor_id] = bool(blackmark)
+        wildcard_flags[actor_id] = bool(wildcard)
+
+    # 2. Загружаем actor_edges через ORM:
+    #    actor_id_low_id, actor_id_high_id, weight
     edges = []
     for edge in ActorEdge.objects.only("actor_id_low", "actor_id_high", "weight").iterator(chunk_size=100000):
         a = edge.actor_id_low_id
@@ -490,7 +526,6 @@ def recalc_actor_popularity(
     scs_raw: Dict[int, float] = defaultdict(float)
 
     for actor_id, neighbors in graph.items():
-        # если сам актёр voice-actor — всё равно считаем, но потом обнулим
         for neighbor_id, edge_w in neighbors:
             neigh_pop_01 = actor_pop.get(neighbor_id, 0.0) / 1000.0
             if neigh_pop_01 <= 0.0:
@@ -518,11 +553,36 @@ def recalc_actor_popularity(
 
     print("→ SCS посчитан, объединяем с базовой популярностью…")
 
-    # 6. Комбинированный финальный рейтинг
+    # 6. Комбинированный финальный рейтинг + возраст + manual flags
     final_scores: Dict[int, float] = {}
     for actor_id, pop in actor_pop.items():
         scs_val = scs_norm.get(actor_id, 0.0)
         final = 0.5 * pop + 0.5 * scs_val
+
+        # age-пессимизация по mean_hit_year
+        year = mean_hit_year.get(actor_id)
+        if year is None:
+            age_factor = 1.0
+        elif year < 1970:
+            age_factor = 0.10
+        elif year < 1985:
+            age_factor = 0.35
+        elif year < 2000:
+            age_factor = 0.75
+        else:
+            age_factor = 1.0
+
+        final *= age_factor
+
+        # manual blackmark → выкинуть
+        if black_flags.get(actor_id):
+            final = 0.0
+
+        # manual wildcard → мягкий буст (но не выше 1000)
+        if wildcard_flags.get(actor_id) and final > 0.0:
+            final *= 1.3
+            if final > 1000.0:
+                final = 1000.0
 
         # выкидываем voice-актеров из финального рейтинга
         if voice_flags.get(actor_id):
@@ -557,7 +617,9 @@ def recalc_actor_popularity(
             f"из {total_actors:,}"
         )
 
-    print("✓ расчёт рейтингов актёров завершён (quality + hits + SCS pow(6) + voice-filter)")
+    print("✓ расчёт рейтингов актёров завершён "
+          "(quality + hits + SCS pow(6) + age penalty by mean year "
+          "+ voice-filter + blackmark/wildcard)")
     return version
 
 
@@ -570,5 +632,6 @@ if __name__ == "__main__":
         w_role=0.15,
         w_quality=0.70,
         w_reach=0.15,
-        notes="hard cut low-vote titles, boost global hits, SCS pow(6), drop voice actors",
+        notes="hard cut low-vote titles, boost global hits, "
+              "SCS pow(6), age penalty by mean year, voice-filter, blackmark/wildcard",
     )
