@@ -71,6 +71,10 @@ class Actor(models.Model):
     # Черный список актёров, которые не будут попадать в топ
     blackmark = models.BooleanField(default=False)
 
+    # Белый список актёров, которые будут добавлены в топ, несмотря на рейтинг
+    wildcard = models.BooleanField(default=False)
+    
+
     popularity_score = models.FloatField(
         null=True,
         blank=True,
