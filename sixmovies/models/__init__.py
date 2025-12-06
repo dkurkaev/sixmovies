@@ -1,4 +1,4 @@
-from .actors import Actor, Profession, ActorProfession
+from .actors import Actor, Profession, ActorProfession, ActorEdge
 from .titles import Title, Genre
 from .principals import TitlePrincipal, TitlePrincipalCharacter
 from .popularity import PopularityVersion
@@ -12,4 +12,5 @@ __all__ = [
     "TitlePrincipal",
     "TitlePrincipalCharacter",
     "PopularityVersion",
+    "ActorEdge",
 ]

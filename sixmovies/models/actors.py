@@ -60,20 +60,17 @@ class Actor(models.Model):
         related_name="actors",
     )
 
-
     known_for = models.ManyToManyField(
-    "sixmovies.Title",
-    related_name="featured_actors",
-    blank=True,
+        "sixmovies.Title",
+        related_name="featured_actors",
+        blank=True,
     )
 
-    class Meta:
-        db_table = "actors"
+    is_voice_actor = models.BooleanField(default=False)
 
-    def __str__(self):
-        return self.name
-    
-    # Наш рассчитанный рейтинг популярности актёра
+    # Черный список актёров, которые не будут попадать в топ
+    blackmark = models.BooleanField(default=False)
+
     popularity_score = models.FloatField(
         null=True,
         blank=True,
@@ -91,15 +88,17 @@ class Actor(models.Model):
         help_text="Ссылка на версию расчёта популярности",
     )
 
+    class Meta:
+        db_table = "actors"
+
+    def __str__(self):
+        return self.name
+
 
 class ActorProfession(models.Model):
     """
     MANY–TO–MANY между Actor и Profession.
-    Именно через отдельную таблицу, потому что она нормализованная,
-    и потому что мы можем потом добавить:
-    - приоритет профессии
-    - роль в конкретном фильме
-    - источник данных (IMDb/TMDB)
+    Именно через отдельную таблицу.
     """
 
     actor = models.ForeignKey(
@@ -120,4 +119,45 @@ class ActorProfession(models.Model):
 
     def __str__(self):
         return f"{self.actor.name} → {self.profession.name}"
-    
+
+
+
+class ActorEdge(models.Model):
+    """
+    НЕОРИЕНТИРОВАННАЯ связь между двумя актёрами,
+    основанная на количестве общих тайтлов (title_principals).
+
+    Создаётся один раз отдельным скриптом:
+    - actor_id_low  < actor_id_high  (строгий порядок)
+    - weight = количество общих значимых тайтлов
+    """
+
+    actor_id_low = models.ForeignKey(
+        Actor,
+        on_delete=models.CASCADE,
+        related_name="edges_low",
+        db_column="actor_id_low",
+    )
+
+    actor_id_high = models.ForeignKey(
+        Actor,
+        on_delete=models.CASCADE,
+        related_name="edges_high",
+        db_column="actor_id_high",
+    )
+
+    weight = models.IntegerField(
+        default=0,
+        help_text="Количество общих тайтлов (clamped ≤ 3 в алгоритме SCS)",
+    )
+
+    class Meta:
+        db_table = "actor_edges"
+        unique_together = ("actor_id_low", "actor_id_high")
+        indexes = [
+            models.Index(fields=["actor_id_low"]),
+            models.Index(fields=["actor_id_high"]),
+        ]
+
+    def __str__(self):
+        return f"{self.actor_id_low_id}-{self.actor_id_high_id}: {self.weight}"
