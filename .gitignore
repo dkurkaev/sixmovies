@@ -1,26 +1,44 @@
-cat > .gitignore << 'EOF'
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Virtual env
-.venv/
-
-# IDE
-.vscode/
-.idea/
-
-# Django
-*.log
-staticfiles/
-media/
-
-# Env
+# System
+.DS_Store
 .env
 
-# ETL datasets
-etl/datasets/
+# Legacy Project
+SixMovies/
 
-EOF
+# --- Backend ---
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/*.pyd
+backend/.venv/
+backend/venv/
+backend/env/
+backend/.vscode/
+backend/.idea/
+backend/*.log
+backend/staticfiles/
+backend/media/
+backend/etl/datasets/
+backend/db.sqlite3
+
+# --- Frontend ---
+frontend_app/node_modules/
+frontend_app/npm-debug.log
+frontend_app/yarn-error.log
+frontend_app/.env
+frontend_app/.idea/
+frontend_app/.gradle/
+frontend_app/android/app/build/
+frontend_app/android/.gradle/
+frontend_app/android/local.properties
+frontend_app/ios/Pods/
+frontend_app/ios/build/
+frontend_app/ios/DerivedData/
+frontend_app/ios/*.xcworkspace
+frontend_app/ios/*.mode1v3
+frontend_app/ios/*.mode2v3
+frontend_app/ios/*.perspectivev3
+frontend_app/ios/*.xcuserstate
+frontend_app/*.jsbundle
+frontend_app/coverage/
+frontend_app/.metro-health-check*
