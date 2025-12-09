@@ -88,7 +88,7 @@ export const GameScreen = () => {
 
     const scrollViewRef = React.useRef<ScrollView>(null);
     const slotOffsets = React.useRef<{ [key: string]: number }>({});
-    const initialLayoutDone = React.useRef(false); // Only measure positions once
+    const measuredSlotsCount = React.useRef(0); // Count how many slots have been measured
     const scrollY = React.useRef(0);
     const savedScrollY = React.useRef(0);
     const focusedScrollY = React.useRef(0); // Position we scrolled to when focusing
@@ -135,13 +135,19 @@ export const GameScreen = () => {
 
     // Scroll to put focused slot at the position of first slot
     const scrollToSlot = (index: number) => {
-        // Use measured positions from initial layout
+        // Use measured position - scroll so this slot appears at top (where slot 0 is)
         const targetSlotY = slotOffsets.current[index];
         const firstSlotY = slotOffsets.current[0];
 
+        console.log('=== SCROLL DEBUG ===');
+        console.log('First slot (0) position:', firstSlotY);
+        console.log('Target slot (' + index + ') position:', targetSlotY);
+        console.log('All slot offsets:', JSON.stringify(slotOffsets.current));
+
         if (targetSlotY !== undefined && firstSlotY !== undefined) {
-            // Scroll by the difference between target and first slot positions
+            // Scroll by the DIFFERENCE to put target slot where first slot was
             const scrollOffset = targetSlotY - firstSlotY;
+            console.log('Scrolling to offset:', scrollOffset);
 
             // SAVE this position so we can return to it after manual swipes
             focusedScrollY.current = scrollOffset;
@@ -313,13 +319,11 @@ export const GameScreen = () => {
                                     <View
                                         key={index}
                                         onLayout={(event) => {
-                                            // Store slot position only ONCE on initial layout
-                                            if (!initialLayoutDone.current) {
+                                            // Store slot position only ONCE - check if this slot already measured
+                                            if (slotOffsets.current[index] === undefined) {
                                                 slotOffsets.current[index] = event.nativeEvent.layout.y;
-                                                // Mark as done when last slot is measured
-                                                if (index === chain.length - 1) {
-                                                    initialLayoutDone.current = true;
-                                                }
+                                                measuredSlotsCount.current++;
+                                                console.log('Slot', index, 'measured at Y:', event.nativeEvent.layout.y);
                                             }
                                         }}
                                     >
